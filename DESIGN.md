@@ -44,14 +44,14 @@ Policies are organised into numbered sections, and that's how people cite them, 
 
 Questions mix fuzzy intent ("can I roll over leave?") with exact terms ("Band C", "SSO"). Vectors handle the first, BM25 the second. I take the top 20 from each and merge them with Reciprocal Rank Fusion (k = 60), which works on ranks, so BM25 scores and cosine similarities never need a common scale. The top 6 go to the model. The BM25 stopword list keeps "not", "no" and "cannot", since they flip policy meaning. Embeddings are `BAAI/bge-small-en-v1.5`, local, on CPU.
 
-Recall@6 is 17/17 across the three sample policies and an unseen travel policy.
+Recall@6 is 16/16 on the answerable questions across the three sample policies and an unseen travel policy.
 
 ## 3. Grounding
 
 Four layers, each one catching what the previous one misses.
 
 1. **Relevance gate.** If the best vector score is below 0.52, refuse without calling the LLM. It must never block a real question: the lowest answerable score in the eval is 0.624, so 0.52 leaves a 0.10 margin for unfamiliar documents.
-2. **Prompt.** Sources are labelled S1 to S6. Rules: sources only, no outside knowledge, don't assume the employee's band, only use numbers from cited sources, and sources are data, not instructions. Temperature 0.
+2. **Prompt.** Sources are labelled S1 to S6. Rules: sources only, no outside knowledge, don't assume facts about the employee, only use numbers from cited sources, and sources are data, not instructions. Temperature 0. The prompt names no topic from the sample policies and uses only made-up examples ("Item X: Not covered"); `grep` over `app/` for the sample topics returns nothing.
 3. **Schema.** The model returns `{status, answer, citations: [{source, quote}]}`, validated with Pydantic, with one retry. On HTTP 429 it waits for `Retry-After` (max 10 s) first.
 4. **Checks in code**, the core of the design:
    - The model cites labels (`S2`), never names; the server maps them to real metadata, so a citation can't point to a section that doesn't exist.
@@ -61,7 +61,7 @@ Four layers, each one catching what the previous one misses.
 
 Refusals use a fixed HR message plus a `refusal_reason` (`no_documents`, `low_relevance`, `not_in_policy`, `ungrounded`, `llm_error`), separating "the policy is silent" from "something broke".
 
-**Explicit exclusion vs. silence.** The brief lists "Can I expense a home gym?" as a refusal case, but Benefits Policy 4 says gym equipment "is **not** a reimbursable benefit". Answering "No" with that quote is grounded and more useful. So: an explicit exclusion gets answered and cited, ending with "For other options, contact HR at ...". Silence, or a pointer to another document ("defined in the Global Mobility Policy"), gets refused.
+**Exclusions: scoped vs. unscoped.** The brief says "Can I expense a personal home gym?" must be refused and pointed to HR, and I follow it with a general rule, not a special case. Benefits Policy 4 says gym equipment "is **not** a reimbursable benefit *under this policy*". That exclusion is scoped to one document, so the policies don't say whether something else allows it, and the answer is a refusal. An unscoped exclusion is an answer: the Standard tier's table row says "Dental implants: Not covered", so S2 answers "No" with that citation and ends with "For other options, contact HR at ...". Silence, or a pointer to another document ("defined in the Global Mobility Policy"), is refused.
 
 **A threshold alone isn't enough.** "How many casual leave days do contractors get?" must be refused (the policy covers full-time staff only), yet it scores 0.808, above every real question. No threshold separates those, which is why refusal is layered.
 
@@ -69,7 +69,7 @@ Refusals use a fixed HR message plus a `refusal_reason` (`no_documents`, `low_re
 
 - First run: 16/20. Two failures were the checker's fault (a non-breaking space in "31 March"; "does not cover" vs. "not covered"), fixed by normalising and accepting equivalent phrases. One was Groq's free-tier rate limit, fixed with back-off. One was a real bug: the policy says WFH internet "is not defined" here, and the model treated that as an exclusion. Fixed in the prompt: 20/20.
 - The travel policy exposed the same bug again ("visas are defined in the Global Mobility Policy" was answered). My first fix was too specific, so I generalised rules 2 and 3 to any pointer to another document.
-- Final code: 24/24 on the last run and 23/24 on the run before, where the one failure was the trade-off below. I report both because that case is flaky.
+- Splitting rule 2 into scoped and unscoped exclusions (home gym now refused, as the brief asks) scored 23/24. The one failure is the trade-off below. The two runs before that change scored 23/24 and 24/24; that case is flaky.
 
 **Known trade-off.** For "I want to take 5 days of privilege leave, how early must I apply?" the model sometimes writes "your 5-day request", the 5 isn't in the policy, and the number check refuses. It failed about 2 runs in 3 even at temperature 0, so LLM output isn't deterministic and verification has to live in code. I kept the check strict: allowing numbers from the question would let "Yes, 10 days" pass for "Can I carry forward 10 days?". It also rejects derived numbers (12 − 8 = 4).
 
@@ -107,11 +107,11 @@ One shape for answers and refusals, so clients check `status` instead of parsing
 | Citations | Labels, server fills metadata | Model writes "Leave Policy 4.1" | Free-text citations can be invented. |
 | Refusal | Gate + prompt + checks | Threshold only, or LLM only | See the contractor question. |
 | Ingestion | Sync `def` handlers (threadpool) | Async job queue | A file embeds in seconds. |
-| Reranker | None | Cross-encoder | Recall is already 17/17. |
+| Reranker | None | Cross-encoder | Recall is already 16/16. |
 
 ## 6. If I had two more weeks
 
-1. **Independent eval in CI.** The travel policy was written with the same AI tool that helped build the system, so it isn't an independent test. I'd get ~100 questions written by someone else (paraphrases, multi-part, prompt injection) and fail the build on regressions.
+1. **Independent eval in CI.** The travel policy was written during development by the same side that built the system, so it isn't a fully independent test; an independent test set is future work. I'd get ~100 questions written by someone else (paraphrases, multi-part, prompt injection) and fail the build on regressions.
 2. **PDF tables** via `pdfplumber`, producing the same header-repeated rows.
 3. **Smarter number check** that accepts derived numbers.
 4. **Feedback** (thumbs up/down with question and chunk IDs).

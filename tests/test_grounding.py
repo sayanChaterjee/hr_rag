@@ -135,16 +135,16 @@ def test_llm_json_parsing_tolerates_fences():
         parse_json_object("sorry, I can't")
 
 
-GYM_QUOTE = "Gym or home-fitness equipment is **not** a reimbursable benefit under this policy."
+LTA_QUOTE = "Unclaimed LTA does **not** carry forward."
 
 
 def test_exclusion_answer_with_hr_sentence_passes_number_check(store, monkeypatch):
     monkeypatch.setattr(config, "HR_CONTACT", "hr-desk@example.com or ext. 4455")
-    answer = f"No, home gym equipment is not reimbursable. {hr_sentence()}"
-    r = answer_question(store, "Can I expense a personal home gym?", fake_llm(cite_where(GYM_QUOTE, answer)))
+    answer = f"No, unclaimed LTA does not carry forward. {hr_sentence()}"
+    r = answer_question(store, "Does unused LTA carry forward to next year?", fake_llm(cite_where(LTA_QUOTE, answer)))
     assert r.status == Status.answered
     assert r.answer.endswith("contact HR at hr-desk@example.com or ext. 4455.")
-    assert r.citations[0].section == "4. Wellness"
+    assert r.citations[0].section == "3. Leave travel allowance (LTA)"
 
 
 def test_hr_sentence_does_not_hide_a_wrong_number(store, monkeypatch):
@@ -199,3 +199,8 @@ def test_chat_json_raises_rate_limit_error_on_429(monkeypatch):
     with pytest.raises(RateLimitError) as e:
         chat_json("sys", "user")
     assert e.value.retry_after == 7.0
+
+
+def test_system_prompt_separates_scoped_and_unscoped_exclusions():
+    p = system_prompt()
+    assert "Unscoped" in p and "Scoped" in p and "under this policy" in p

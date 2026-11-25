@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class AskRequest(BaseModel):
-    question: str = Field(..., max_length=1000, examples=["What is the casual leave carry-forward limit?"])
+    question: str = Field(..., max_length=1000, examples=["What does the policy say about topic X?"])
 
     @field_validator("question")
     @classmethod
@@ -31,8 +31,8 @@ class RefusalReason(str, Enum):
 
 
 class Citation(BaseModel):
-    document: str = Field(..., description="Document title, e.g. 'Leave Policy'")
-    section: str = Field(..., description="Heading path, e.g. '4. Carry-forward > 4.1 Casual leave'")
+    document: str = Field(..., description="Document title, e.g. 'Example Policy'")
+    section: str = Field(..., description="Heading path, e.g. '2. Section > 2.1 Subsection'")
     quote: str = Field(..., description="Verbatim supporting text, verified server-side")
     doc_id: str
     doc_version: str

@@ -61,10 +61,7 @@
   answer_contains: ["restricted"]
 
 - q: Can I expense a personal home gym?
-  expect: answer
-  doc: benefits-policy
-  section: "Wellness"
-  answer_any: ["not reimbursable", "not a reimbursable", "cannot be expensed", "can't be expensed", "cannot be reimbursed"]
+  expect: refuse  # brief requires refusal; Benefits §4 exclusion is scoped 'under this policy'
 - q: Does unused LTA carry forward to next year?
   expect: answer
   doc: benefits-policy
