@@ -6,24 +6,28 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _env(name: str, default: str) -> str:
+    return os.getenv(name) or default
+
+
 def _f(name: str, default: float) -> float:
-    return float(os.getenv(name, default))
+    return float(_env(name, str(default)))
 
 
 def _i(name: str, default: int) -> int:
-    return int(os.getenv(name, default))
+    return int(_env(name, str(default)))
 
 
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
+LLM_PROVIDER = _env("LLM_PROVIDER", "groq").lower()
 _PROVIDER_DEFAULTS = {
     "groq": ("https://api.groq.com/openai/v1", "openai/gpt-oss-120b"),
     "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3.7-flash"),
     "ollama": ("http://localhost:11434/v1", "llama3.1:8b"),
 }
 _base, _model = _PROVIDER_DEFAULTS.get(LLM_PROVIDER, _PROVIDER_DEFAULTS["groq"])
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", _base)
-LLM_MODEL = os.getenv("LLM_MODEL", _model)
-LLM_API_KEY = os.getenv("LLM_API_KEY", "ollama" if LLM_PROVIDER == "ollama" else "")
+LLM_BASE_URL = _env("LLM_BASE_URL", _base)
+LLM_MODEL = _env("LLM_MODEL", _model)
+LLM_API_KEY = _env("LLM_API_KEY", "ollama" if LLM_PROVIDER == "ollama" else "")
 LLM_TIMEOUT_S = _f("LLM_TIMEOUT_S", 30)
 
 EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")

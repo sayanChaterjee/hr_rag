@@ -11,7 +11,7 @@ Design rationale: see **[DESIGN.md](DESIGN.md)**.
 Requires Python 3.10+.
 
 ```bash
-git clone <this repo> && cd hr-rag
+git clone https://github.com/sayanChaterjee/hr_rag.git && cd hr_rag
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 # Linux only, avoids a 2 GB CUDA download:
 #   pip install torch --index-url https://download.pytorch.org/whl/cpu
@@ -57,11 +57,15 @@ Policy text never leaves your machine except the top retrieved chunks sent to th
 |---|---|---|
 | `LLM_PROVIDER` | `groq` | `groq` / `gemini` / `ollama` |
 | `LLM_API_KEY` | — | Provider key (not needed for Ollama) |
-| `LLM_MODEL`, `LLM_BASE_URL` | per provider | Overrides |
+| `LLM_MODEL`, `LLM_BASE_URL` | per provider | Overrides; leave empty for the provider default |
+| `LLM_TIMEOUT_S` | `30` | LLM request timeout |
 | `EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | Any sentence-transformers model (`hashing` = test-only) |
 | `MIN_VECTOR_SCORE` | `0.52` | Retrieval gate. Calibrate with the eval (below) |
 | `TOP_K` | `6` | Chunks sent to the LLM |
-| `ADMIN_TOKEN` | `admin` | Required in `X-Admin-Token` to upload/delete |
+| `CANDIDATES_PER_RETRIEVER`, `RRF_K` | `20`, `60` | Hybrid retrieval settings |
+| `MAX_CHUNK_CHARS` | `1500` | Max chunk size |
+| `MAX_UPLOAD_BYTES` | `5242880` | Upload limit (5 MB) |
+| `ADMIN_TOKEN` | `change-me` in `.env.example` | Required in `X-Admin-Token` to upload/delete. Change it |
 | `HR_CONTACT` | `hr@example.com` | Shown in refusals |
 | `DATA_DIR` | `data` | SQLite location |
 | `API_URL` | `http://localhost:8000` | Used by the Streamlit UI |
@@ -70,7 +74,7 @@ Policy text never leaves your machine except the top retrieved chunks sent to th
 
 ```bash
 # Upload (admin)
-curl -H "X-Admin-Token: admin" -F file=@sample_policies/leave-policy.md localhost:8000/documents
+curl -H "X-Admin-Token: change-me" -F file=@sample_policies/leave-policy.md localhost:8000/documents
 # Ask
 curl localhost:8000/ask -H 'content-type: application/json' \
      -d '{"question": "What is the casual leave carry-forward limit?"}'
@@ -99,9 +103,13 @@ Interactive docs at `/docs`.
 ## Tests and evaluation
 
 ```bash
-pytest -q                                   # 29 tests, offline, no API key, no model download
+pytest -q                                   # 38 tests, offline, no API key, no model download
 python -m eval.run_eval --retrieval-only    # recall@k + suggested MIN_VECTOR_SCORE (no LLM calls)
 python -m eval.run_eval --delay 15          # full pipeline on 20 questions -> eval/results.json
+
+# sample policies + an unseen travel policy, 24 questions
+python -m eval.run_eval --delay 15 --policies sample_policies tests/fixtures/travel-policy.md \
+    --questions eval/questions.yaml eval/unseen.yaml
 ```
 
 ## Project layout
@@ -117,7 +125,7 @@ app/
   main.py        FastAPI endpoints
   cli.py         ingest / ask from the terminal
 ui/streamlit_app.py
-eval/questions.yaml, eval/run_eval.py
-tests/
+eval/questions.yaml, eval/unseen.yaml, eval/run_eval.py
+tests/           (tests/fixtures/ holds the unseen travel policy)
 sample_policies/
 ```
