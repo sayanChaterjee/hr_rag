@@ -13,7 +13,7 @@
   doc: leave-policy
   section: "4.1"
   answer_contains: ["31 March"]
-- q: I want to take 5 days of privilege leave. How early must I apply?
+- q: I want to take 5 days of privilege leave. How early must I apply?  # known false refusal: number check (model echoes '5' from the question); intentional trade-off, see DESIGN.md
   expect: answer
   doc: leave-policy
   section: "2.3"
