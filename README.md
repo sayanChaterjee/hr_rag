@@ -59,7 +59,7 @@ Policy text never leaves your machine except the top retrieved chunks sent to th
 | `LLM_API_KEY` | — | Provider key (not needed for Ollama) |
 | `LLM_MODEL`, `LLM_BASE_URL` | per provider | Overrides |
 | `EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | Any sentence-transformers model (`hashing` = test-only) |
-| `MIN_VECTOR_SCORE` | `0.50` | Retrieval gate. Calibrate with the eval (below) |
+| `MIN_VECTOR_SCORE` | `0.52` | Retrieval gate. Calibrate with the eval (below) |
 | `TOP_K` | `6` | Chunks sent to the LLM |
 | `ADMIN_TOKEN` | `admin` | Required in `X-Admin-Token` to upload/delete |
 | `HR_CONTACT` | `hr@example.com` | Shown in refusals |
