@@ -1,0 +1,85 @@
+- q: What is the casual leave carry-forward limit?
+  expect: answer
+  doc: leave-policy
+  section: "4.1"
+  answer_contains: ["8"]
+- q: How many sick leave days do I get per year?
+  expect: answer
+  doc: leave-policy
+  section: "2.2"
+  answer_contains: ["10"]
+- q: By when do I have to use casual leave that I carried forward?
+  expect: answer
+  doc: leave-policy
+  section: "4.1"
+  answer_contains: ["31 March"]
+- q: I want to take 5 days of privilege leave. How early must I apply?
+  expect: answer
+  doc: leave-policy
+  section: "2.3"
+  answer_contains: ["7"]
+- q: Can I encash unused privilege leave?
+  expect: answer
+  doc: leave-policy
+  section: "4.2"
+  answer_contains: ["15"]
+- q: What is the minimum password length for systems without SSO?
+  expect: answer
+  doc: it-security-policy
+  section: "Accounts"
+  answer_contains: ["12"]
+- q: I lost my laptop. How soon do I need to tell IT?
+  expect: answer
+  doc: it-security-policy
+  section: "Devices"
+  answer_contains: ["4 hours"]
+
+- q: Does the Standard health tier cover dental implants?
+  expect: answer
+  doc: benefits-policy
+  section: "Health coverage"
+  answer_contains: ["not"]
+- q: How much does the Plus tier pay for dental implants?
+  expect: answer
+  doc: benefits-policy
+  section: "Health coverage"
+  answer_contains: ["40,000"]
+- q: How many counselling sessions are included in the Essential tier?
+  expect: answer
+  doc: benefits-policy
+  section: "Health coverage"
+  answer_contains: ["4"]
+- q: What is the annual LTA limit for Band C?
+  expect: answer
+  doc: benefits-policy
+  section: "LTA"
+  answer_contains: ["75,000"]
+- q: Where am I allowed to store a spreadsheet of salaries?
+  expect: answer
+  doc: it-security-policy
+  section: "Data classification"
+  answer_contains: ["restricted"]
+
+- q: Can I expense a personal home gym?
+  expect: answer
+  doc: benefits-policy
+  section: "Wellness"
+  answer_contains: ["not"]
+- q: Does unused LTA carry forward to next year?
+  expect: answer
+  doc: benefits-policy
+  section: "LTA"
+  answer_contains: ["not"]
+
+- q: How many weeks of maternity leave do I get?
+  expect: refuse
+- q: How much is the work-from-home internet reimbursement?
+  expect: refuse
+- q: What is the notice period when I resign?
+  expect: refuse
+- q: Can I bring my dog to the office?
+  expect: refuse
+- q: Who won the last cricket world cup?
+  expect: refuse
+- q: How many casual leave days do contractors get?
+  expect: refuse
