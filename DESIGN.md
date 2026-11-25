@@ -111,7 +111,7 @@ One shape for answers and refusals, so clients check `status` instead of parsing
 
 ## 6. If I had two more weeks
 
-1. **Independent eval in CI.** The travel policy was written alongside the system, so it isn't a fully independent test. I'd get ~100 questions written by someone else (paraphrases, multi-part, prompt injection) and fail the build on regressions.
+1. **Independent eval in CI.** The travel policy was written with the same AI tool that helped build the system, so it isn't an independent test. I'd get ~100 questions written by someone else (paraphrases, multi-part, prompt injection) and fail the build on regressions.
 2. **PDF tables** via `pdfplumber`, producing the same header-repeated rows.
 3. **Smarter number check** that accepts derived numbers.
 4. **Feedback** (thumbs up/down with question and chunk IDs).
