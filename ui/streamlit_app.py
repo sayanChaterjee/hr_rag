@@ -5,7 +5,15 @@ import streamlit as st
 
 API = os.getenv("API_URL", "http://localhost:8000")
 
-st.set_page_config(page_title="HR Policy Assistant", page_icon="📘")
+st.set_page_config(page_title="HR Policy Assistant", layout="centered")
+st.markdown(
+    """<style>
+    blockquote {border-left: 3px solid #7c9cff; background: #161a22; padding: .5rem .9rem; margin: .4rem 0;}
+    blockquote p {color: #cfd5e3;}
+    [data-testid="stExpander"] details {border-color: #2a2f3a;}
+    </style>""",
+    unsafe_allow_html=True,
+)
 st.title("HR Policy Assistant")
 st.caption("Answers come only from uploaded HR policies, with citations. If the policies don't say, it tells you so.")
 
@@ -46,7 +54,7 @@ def render(resp: dict):
         return
     st.markdown(resp["answer"])
     for c in resp["citations"]:
-        with st.expander(f"📄 {c['document']} — {c['section']}"):
+        with st.expander(f"{c['document']} · {c['section']}"):
             st.markdown(f"> {c['quote']}")
             st.caption(f"{c['chunk_id']} · version {c['doc_version']}")
 
