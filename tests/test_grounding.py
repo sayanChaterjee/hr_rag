@@ -1,12 +1,15 @@
 import re
 
+import httpx
+import pytest
+
 from app import config
 from app.text import normalize
 from app.answer import (answer_question, hr_sentence, numbers_supported,
                         quote_supported, system_prompt)
 from app.embeddings import get_embedder
 from app.ingest import parse_document
-from app.llm import LLMError
+from app.llm import LLMError, RateLimitError, chat_json
 from app.models import RefusalReason, Status
 from app.store import Store
 
@@ -155,3 +158,44 @@ def test_system_prompt_includes_hr_contact(monkeypatch):
     monkeypatch.setattr(config, "HR_CONTACT", "people@acme.test")
     assert "For other options, contact HR at people@acme.test." in system_prompt()
     assert "{hr_sentence}" not in system_prompt()
+
+
+def _rate_limited_once(retry_after, calls):
+    good = cite_where(GOOD_QUOTE, "You can carry forward up to 8 days.")
+
+    def _llm(system, user):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RateLimitError(retry_after)
+        return good(user)
+    return _llm
+
+
+@pytest.mark.parametrize("retry_after,expected_sleep", [(3, 3), (60, 10), (None, 5)])
+def test_rate_limit_waits_then_retries(store, monkeypatch, retry_after, expected_sleep):
+    slept, calls = [], []
+    monkeypatch.setattr("app.answer.time.sleep", slept.append)
+    r = answer_question(store, Q, _rate_limited_once(retry_after, calls))
+    assert r.status == Status.answered
+    assert len(calls) == 2
+    assert slept == [expected_sleep]
+
+
+def test_other_errors_retry_without_sleeping(store, monkeypatch):
+    slept = []
+    monkeypatch.setattr("app.answer.time.sleep", slept.append)
+
+    def broken(system, user):
+        raise LLMError("boom")
+    answer_question(store, Q, broken)
+    assert slept == []
+
+
+def test_chat_json_raises_rate_limit_error_on_429(monkeypatch):
+    monkeypatch.setattr(config, "LLM_API_KEY", "test-key")
+    monkeypatch.setattr("app.llm.httpx.post",
+                        lambda *a, **k: httpx.Response(429, headers={"retry-after": "7"},
+                                                       request=httpx.Request("POST", "http://x")))
+    with pytest.raises(RateLimitError) as e:
+        chat_json("sys", "user")
+    assert e.value.retry_after == 7.0

@@ -43,6 +43,11 @@ The app talks to any OpenAI-compatible chat endpoint. Pick one via `LLM_PROVIDER
 Model IDs on free tiers change often. If you get a 404 or "model decommissioned",
 set `LLM_MODEL` to a current model from the provider's list.
 
+Free tiers are rate-limited. Groq's free tier allows about 8,000 tokens per minute for
+`openai/gpt-oss-120b`, which is roughly 4 questions a minute. On a 429 the app waits
+(using the `Retry-After` header, capped at 10 s) and retries once; if that also fails it
+returns a refusal with `refusal_reason: "llm_error"`. For the full eval use `--delay 15`.
+
 **Embeddings** are always local: `BAAI/bge-small-en-v1.5` via sentence-transformers.
 Policy text never leaves your machine except the top retrieved chunks sent to the LLM.
 
@@ -96,7 +101,7 @@ Interactive docs at `/docs`.
 ```bash
 pytest -q                                   # 29 tests, offline, no API key, no model download
 python -m eval.run_eval --retrieval-only    # recall@k + suggested MIN_VECTOR_SCORE (no LLM calls)
-python -m eval.run_eval                     # full pipeline on 20 questions -> eval/results.json
+python -m eval.run_eval --delay 15          # full pipeline on 20 questions -> eval/results.json
 ```
 
 ## Project layout

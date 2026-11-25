@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import re
+import time
 from typing import Callable
 
 from pydantic import ValidationError
 
 from . import config
-from .llm import LLMError, chat_json
+from .llm import LLMError, RateLimitError, chat_json
 from .models import (AskResponse, Citation, LLMAnswer, RefusalReason,
                      RetrievalDebug, Status)
 from .retrieval import Hit, retrieve
@@ -74,9 +75,13 @@ def refuse(reason: RefusalReason, debug: RetrievalDebug | None = None) -> AskRes
 
 def _call_llm(llm: LLMFn, user_msg: str) -> LLMAnswer:
     last: Exception | None = None
-    for _ in range(2):
+    for attempt in range(2):
         try:
             return LLMAnswer.model_validate(llm(system_prompt(), user_msg))
+        except RateLimitError as e:
+            last = e
+            if attempt == 0:
+                time.sleep(min(e.retry_after or 5, 10))
         except (LLMError, ValidationError) as e:
             last = e
     raise LLMError(str(last))

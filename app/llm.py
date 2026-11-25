@@ -12,6 +12,19 @@ class LLMError(RuntimeError):
     pass
 
 
+class RateLimitError(LLMError):
+    def __init__(self, retry_after: float | None):
+        super().__init__(f"LLM rate limited (retry after {retry_after}s)")
+        self.retry_after = retry_after
+
+
+def _retry_after(resp: httpx.Response) -> float | None:
+    try:
+        return float(resp.headers["retry-after"])
+    except (KeyError, ValueError):
+        return None
+
+
 def chat_json(system: str, user: str) -> dict:
     if not config.LLM_API_KEY:
         raise LLMError("LLM_API_KEY is not set")
@@ -28,6 +41,8 @@ def chat_json(system: str, user: str) -> dict:
             },
             timeout=config.LLM_TIMEOUT_S,
         )
+        if resp.status_code == 429:
+            raise RateLimitError(_retry_after(resp))
         resp.raise_for_status()
         content = resp.json()["choices"][0]["message"]["content"]
     except (httpx.HTTPError, KeyError, IndexError, ValueError) as e:
