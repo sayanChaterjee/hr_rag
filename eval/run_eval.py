@@ -51,6 +51,14 @@ def retrieval_only(store, cases):
     print(f"suggested MIN_VECTOR_SCORE ≈ {lo_ans - 0.05:.2f} (current {config.MIN_VECTOR_SCORE})")
 
 
+def content_ok(case, answer) -> bool:
+    text = normalize(answer)
+    if not all(normalize(s) in text for s in case.get("answer_contains", [])):
+        return False
+    phrases = case.get("answer_any", [])
+    return not phrases or any(normalize(p) in text for p in phrases)
+
+
 def full(store, cases, delay):
     rows, passed = [], 0
     for c in cases:
@@ -58,7 +66,7 @@ def full(store, cases, delay):
         checks = {"status": resp.status.value == ("answered" if c["expect"] == "answer" else "refused")}
         if c["expect"] == "answer":
             checks["citation"] = any(expected_hit(c, x.doc_id, x.section) for x in resp.citations)
-            checks["content"] = all(normalize(s) in normalize(resp.answer) for s in c.get("answer_contains", []))
+            checks["content"] = content_ok(c, resp.answer)
         ok = all(checks.values())
         passed += ok
         print(f"{'PASS' if ok else 'FAIL'}  {c['q']}")

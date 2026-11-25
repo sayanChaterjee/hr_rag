@@ -38,7 +38,7 @@
   expect: answer
   doc: benefits-policy
   section: "Health coverage"
-  answer_contains: ["not"]
+  answer_any: ["not covered", "does not cover", "isn't covered", "is not covered"]
 - q: How much does the Plus tier pay for dental implants?
   expect: answer
   doc: benefits-policy
@@ -64,12 +64,12 @@
   expect: answer
   doc: benefits-policy
   section: "Wellness"
-  answer_contains: ["not"]
+  answer_any: ["not reimbursable", "not a reimbursable", "cannot be expensed", "can't be expensed", "cannot be reimbursed"]
 - q: Does unused LTA carry forward to next year?
   expect: answer
   doc: benefits-policy
   section: "LTA"
-  answer_contains: ["not"]
+  answer_any: ["not carry forward", "does not carry", "doesn't carry", "cannot be carried", "is not carried", "lapses"]
 
 - q: How many weeks of maternity leave do I get?
   expect: refuse
