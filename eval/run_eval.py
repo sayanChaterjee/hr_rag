@@ -18,11 +18,13 @@ from app.store import Store
 ROOT = Path(__file__).parent.parent
 
 
-def load_store(policy_dir: Path) -> Store:
+def load_store(*paths: Path) -> Store:
     store = Store(":memory:", get_embedder())
-    for f in sorted(policy_dir.iterdir()):
-        if f.suffix.lower() in {".md", ".txt", ".pdf"}:
-            store.upsert(parse_document(f.name, f.read_bytes()))
+    for path in paths:
+        files = sorted(path.iterdir()) if path.is_dir() else [path]
+        for f in files:
+            if f.suffix.lower() in {".md", ".txt", ".pdf"}:
+                store.upsert(parse_document(f.name, f.read_bytes()))
     return store
 
 
@@ -83,13 +85,14 @@ def full(store, cases, delay):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--retrieval-only", action="store_true")
-    ap.add_argument("--policies", default=str(ROOT / "sample_policies"))
-    ap.add_argument("--questions", default=str(ROOT / "eval" / "questions.yaml"))
+    ap.add_argument("--policies", nargs="+", default=[str(ROOT / "sample_policies")],
+                    help="policy folders or files")
+    ap.add_argument("--questions", nargs="+", default=[str(ROOT / "eval" / "questions.yaml")])
     ap.add_argument("--delay", type=float, default=1.0, help="seconds between LLM calls")
     args = ap.parse_args()
 
-    cases = yaml.safe_load(Path(args.questions).read_text())
-    store = load_store(Path(args.policies))
+    cases = [c for q in args.questions for c in yaml.safe_load(Path(q).read_text())]
+    store = load_store(*(Path(p) for p in args.policies))
     retrieval_only(store, cases) if args.retrieval_only else full(store, cases, args.delay)
 
 

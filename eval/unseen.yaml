@@ -1,0 +1,17 @@
+- q: How many days before travel do I need to book a domestic flight?
+  expect: answer
+  doc: travel-policy
+  section: "2.1"
+  answer_contains: ["14"]
+- q: What is the international daily allowance for Band C?
+  expect: answer
+  doc: travel-policy
+  section: "Flight class"
+  answer_contains: ["80"]
+- q: Can I claim minibar charges from a hotel stay?
+  expect: answer
+  doc: travel-policy
+  section: "not reimbursed"
+  answer_any: ["not reimbursable", "not reimbursed", "cannot be claimed", "can't be claimed", "cannot claim"]
+- q: What documents do I need for a work visa to Germany?
+  expect: refuse
