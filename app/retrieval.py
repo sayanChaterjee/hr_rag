@@ -41,6 +41,7 @@ def retrieve(store: Store, question: str, top_k: int | None = None) -> Retrieval
     bm25_scores = bm25.get_scores(q_tokens) if q_tokens else np.zeros(len(chunks))
     bm25_rank = [i for i in np.argsort(-bm25_scores)[:n_cand] if bm25_scores[i] > 0]
 
+    # RRF merges by rank, so BM25 scores and cosine similarities never need a common scale.
     fused: dict[int, float] = {}
     for ranking in (vec_rank, bm25_rank):
         for rank, idx in enumerate(ranking):
@@ -50,4 +51,5 @@ def retrieve(store: Store, question: str, top_k: int | None = None) -> Retrieval
     hits = [Hit(chunks[i], fused[i], float(vec_scores[i]), float(bm25_scores[i])) for i in order]
 
     top_vec = float(vec_scores.max())
+    # Only the dense score can open the gate: BM25 also matches common words that appear in every document.
     return RetrievalResult(hits, top_vec, top_vec >= config.MIN_VECTOR_SCORE)

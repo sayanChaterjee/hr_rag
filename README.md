@@ -65,7 +65,7 @@ Policy text never leaves your machine except the top retrieved chunks sent to th
 | `CANDIDATES_PER_RETRIEVER`, `RRF_K` | `20`, `60` | Hybrid retrieval settings |
 | `MAX_CHUNK_CHARS` | `1500` | Max chunk size |
 | `MAX_UPLOAD_BYTES` | `5242880` | Upload limit (5 MB) |
-| `ADMIN_TOKEN` | `change-me` in `.env.example` | Required in `X-Admin-Token` to upload/delete. Change it |
+| `ADMIN_TOKEN` | `change-me` | Required in `X-Admin-Token` to upload/delete. Change it |
 | `HR_CONTACT` | `hr@example.com` | Shown in refusals |
 | `DATA_DIR` | `data` | SQLite location |
 | `API_URL` | `http://localhost:8000` | Used by the Streamlit UI |

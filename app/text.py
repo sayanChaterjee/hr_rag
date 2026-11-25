@@ -1,6 +1,7 @@
 import re
 import unicodedata
 
+# Short on purpose; "not", "no" and "cannot" stay because they flip what a policy line means.
 STOPWORDS = {
     "a", "an", "the", "is", "are", "was", "be", "to", "of", "in", "on", "for", "and",
     "or", "i", "my", "me", "we", "our", "you", "your", "it", "its", "do", "does", "can",

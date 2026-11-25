@@ -100,6 +100,7 @@ def answer_question(store: Store, question: str, llm: LLMFn = chat_json) -> AskR
         return refuse(RefusalReason.low_relevance, debug)
 
     context, labels = build_context(result.hits)
+    # Fail closed: an LLM problem becomes a refusal, never a 500 or an unchecked answer.
     try:
         out = _call_llm(llm, f"SOURCES:\n{context}\n\nQUESTION: {question}")
     except LLMError:
@@ -110,6 +111,7 @@ def answer_question(store: Store, question: str, llm: LLMFn = chat_json) -> AskR
 
     citations, cited_texts, seen = [], [], set()
     for c in out.citations:
+        # The model only cites S-labels; document and section come from our metadata, so they can't be invented.
         chunk = labels.get(c.source.strip().strip("[]"))
         if chunk is None or chunk.chunk_id in seen:
             continue

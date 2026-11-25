@@ -47,7 +47,12 @@ class Store:
         self.db.executescript(SCHEMA)
         self._rebuild_index()
 
+    @property
+    def chunks(self) -> list[Chunk]:
+        return self._index[0]
+
     def upsert(self, doc: ParsedDocument) -> UpsertResult:
+        # Embed before taking the lock: it's the slow step, and a crash here leaves the old version untouched.
         vectors = self.embedder.encode([c.embed_text for c in doc.chunks])
         with self._lock:
             row = self.db.execute(
@@ -78,13 +83,16 @@ class Store:
         return n > 0
 
     def list_documents(self) -> list[dict]:
-        cur = self.db.execute(
-            "SELECT doc_id, title, filename, content_hash, uploaded_at, n_chunks FROM documents ORDER BY title")
+        with self._lock:
+            rows = self.db.execute(
+                "SELECT doc_id, title, filename, content_hash, uploaded_at, n_chunks FROM documents ORDER BY title"
+            ).fetchall()
         keys = ["doc_id", "title", "filename", "version", "uploaded_at", "chunks"]
-        return [dict(zip(keys, r)) for r in cur.fetchall()]
+        return [dict(zip(keys, r)) for r in rows]
 
     def version_of(self, doc_id: str) -> str:
-        row = self.db.execute("SELECT content_hash FROM documents WHERE doc_id = ?", (doc_id,)).fetchone()
+        with self._lock:
+            row = self.db.execute("SELECT content_hash FROM documents WHERE doc_id = ?", (doc_id,)).fetchone()
         return row[0] if row else ""
 
     def _rebuild_index(self) -> None:
@@ -95,7 +103,8 @@ class Store:
         matrix = (np.vstack([np.frombuffer(r[7], dtype=np.float32) for r in rows])
                   if rows else np.zeros((0, 1), dtype=np.float32))
         bm25 = BM25Okapi([tokenize(c.embed_text) for c in chunks]) if chunks else None
-        self.chunks, self.matrix, self.bm25 = chunks, matrix, bm25
+        # One attribute, one assignment: readers see the old index or the new one, never a mix.
+        self._index = (chunks, matrix, bm25)
 
-    def snapshot(self):
-        return self.chunks, self.matrix, self.bm25
+    def snapshot(self) -> tuple[list[Chunk], np.ndarray, BM25Okapi | None]:
+        return self._index

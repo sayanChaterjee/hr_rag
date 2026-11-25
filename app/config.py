@@ -48,7 +48,7 @@ REFUSAL_MESSAGE = (
     f"Please contact HR at {HR_CONTACT}."
 )
 MAX_UPLOAD_BYTES = _i("MAX_UPLOAD_BYTES", 5 * 1024 * 1024)
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "admin")
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "change-me")
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
 DB_PATH = DATA_DIR / "hr_rag.sqlite3"

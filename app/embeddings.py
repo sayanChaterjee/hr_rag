@@ -21,6 +21,7 @@ class SentenceTransformerEmbedder:
         self.model = SentenceTransformer(model_name)
 
     def encode(self, texts: list[str], is_query: bool = False) -> np.ndarray:
+        # bge was trained with this instruction on the query side only; documents are embedded as-is.
         if is_query and config.EMBED_QUERY_PREFIX:
             texts = [config.EMBED_QUERY_PREFIX + t for t in texts]
         vecs = self.model.encode(texts, normalize_embeddings=True, show_progress_bar=False)

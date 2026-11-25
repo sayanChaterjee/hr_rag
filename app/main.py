@@ -11,6 +11,7 @@ from .ingest import IngestError, parse_document
 from .models import AskRequest, AskResponse, DocumentInfo, UploadResponse
 from .store import Store
 
+# Handlers are plain def, not async: embedding is CPU-bound, and FastAPI runs def handlers in a threadpool.
 app = FastAPI(title="HR Policy Assistant", version="0.1.0")
 
 
