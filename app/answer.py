@@ -17,7 +17,7 @@ SYSTEM_PROMPT = """You are an HR policy assistant. You answer employee questions
 
 Rules:
 1. If the SOURCES contain the answer, set "status" to "answered". Keep the answer to 1-3 sentences and include any limits, conditions or deadlines the sources attach to it.
-2. If a source explicitly says something is not covered, not allowed, or not reimbursable, that IS an answer: say so and cite it. But a source saying a topic is "not defined" here, or is published elsewhere (e.g. "separate circulars"), is NOT an exclusion: apply rule 3.
+2. If a source explicitly says something is not covered, not allowed, or not reimbursable, that IS an answer: say so, cite it, and end the answer with exactly this sentence: "{hr_sentence}" But a source saying a topic is "not defined" here, or is published elsewhere (e.g. "separate circulars"), is NOT an exclusion: apply rule 3.
 3. If the SOURCES do not contain the answer, or only say the topic is not defined here or is defined in some other document, set "status" to "refused", "answer" to "" and "citations" to [].
 4. Never use outside knowledge, typical company practice, law, or assumptions. Do not guess the employee's band, tier or location; if the answer depends on it, give the answer for each case the sources list.
 5. Every factual claim must be supported by a citation. For each source you use, copy a short quote (under 30 words) EXACTLY, character for character, from that source.
@@ -27,6 +27,14 @@ Return ONLY a JSON object of this form:
 {"status": "answered" | "refused", "answer": "<string>", "citations": [{"source": "S1", "quote": "<exact text from S1>"}]}"""
 
 LLMFn = Callable[[str, str], dict]
+
+
+def hr_sentence() -> str:
+    return f"For other options, contact HR at {config.HR_CONTACT}."
+
+
+def system_prompt() -> str:
+    return SYSTEM_PROMPT.replace("{hr_sentence}", hr_sentence())
 
 
 def build_context(hits: list[Hit]) -> tuple[str, dict]:
@@ -68,7 +76,7 @@ def _call_llm(llm: LLMFn, user_msg: str) -> LLMAnswer:
     last: Exception | None = None
     for _ in range(2):
         try:
-            return LLMAnswer.model_validate(llm(SYSTEM_PROMPT, user_msg))
+            return LLMAnswer.model_validate(llm(system_prompt(), user_msg))
         except (LLMError, ValidationError) as e:
             last = e
     raise LLMError(str(last))
@@ -109,7 +117,7 @@ def answer_question(store: Store, question: str, llm: LLMFn = chat_json) -> AskR
 
     if not citations:
         return refuse(RefusalReason.ungrounded, debug)
-    if not numbers_supported(out.answer, cited_texts):
+    if not numbers_supported(out.answer.replace(hr_sentence(), ""), cited_texts):
         return refuse(RefusalReason.ungrounded, debug)
 
     return AskResponse(status=Status.answered, answer=out.answer.strip(),

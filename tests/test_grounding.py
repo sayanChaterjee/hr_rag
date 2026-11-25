@@ -2,7 +2,8 @@ import re
 
 from app import config
 from app.text import normalize
-from app.answer import answer_question, numbers_supported, quote_supported
+from app.answer import (answer_question, hr_sentence, numbers_supported,
+                        quote_supported, system_prompt)
 from app.embeddings import get_embedder
 from app.ingest import parse_document
 from app.llm import LLMError
@@ -129,3 +130,28 @@ def test_llm_json_parsing_tolerates_fences():
     import pytest
     with pytest.raises(LLMError):
         parse_json_object("sorry, I can't")
+
+
+GYM_QUOTE = "Gym or home-fitness equipment is **not** a reimbursable benefit under this policy."
+
+
+def test_exclusion_answer_with_hr_sentence_passes_number_check(store, monkeypatch):
+    monkeypatch.setattr(config, "HR_CONTACT", "hr-desk@example.com or ext. 4455")
+    answer = f"No, home gym equipment is not reimbursable. {hr_sentence()}"
+    r = answer_question(store, "Can I expense a personal home gym?", fake_llm(cite_where(GYM_QUOTE, answer)))
+    assert r.status == Status.answered
+    assert r.answer.endswith("contact HR at hr-desk@example.com or ext. 4455.")
+    assert r.citations[0].section == "4. Wellness"
+
+
+def test_hr_sentence_does_not_hide_a_wrong_number(store, monkeypatch):
+    monkeypatch.setattr(config, "HR_CONTACT", "ext. 4455")
+    answer = f"You can carry forward up to 10 days. {hr_sentence()}"
+    r = answer_question(store, Q, fake_llm(cite_where(GOOD_QUOTE, answer)))
+    assert r.refusal_reason == RefusalReason.ungrounded
+
+
+def test_system_prompt_includes_hr_contact(monkeypatch):
+    monkeypatch.setattr(config, "HR_CONTACT", "people@acme.test")
+    assert "For other options, contact HR at people@acme.test." in system_prompt()
+    assert "{hr_sentence}" not in system_prompt()
