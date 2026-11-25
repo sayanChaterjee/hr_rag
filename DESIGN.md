@@ -1,224 +1,128 @@
-# DESIGN: HR Policy Assistant
+# Design: HR Policy Assistant
 
-**Goal:** answer employee questions *only* from uploaded HR policies, cite the
-exact document and section, and refuse when the policies are silent. A wrong but
-confident answer about leave or benefits is worse than "please ask HR", so
-**every uncertain path fails closed** (ends in a refusal).
-
----
+The assistant answers employee questions only from uploaded HR policies, citing document, section and exact quote, and refuses otherwise. A confident wrong answer about leave is worse than "please ask HR", so every uncertain path ends in a refusal.
 
 ## 1. Architecture
 
 ```
-                 ┌──────────────── INGEST (admin) ───────────────┐
- .md/.txt/.pdf ─►│ extract_text ─► split by headings ─► chunks    │
-   POST /documents   (validate)     + table-row chunks            │
-                 │                         │                      │
-                 │              local embed (bge-small)           │
-                 │                         ▼                      │
-                 │   SQLite (documents, chunks, vectors)  ──►  in-memory index
-                 └───────────────────────────────────────────  (numpy matrix + BM25)
-                                                                   │
-                 ┌──────────────── QUERY (employee) ──────────────┐│
- question ──────►│ validate ─► hybrid retrieve ◄───────────────────┘
-   POST /ask     │              (BM25 + vector, RRF, top 6)       │
-                 │                  │                             │
-                 │      gate: best similarity < threshold? ──yes──► REFUSE (no LLM call)
-                 │                  │ no                          │
-                 │   prompt with labelled sources S1..S6          │
-                 │                  ▼                             │
-                 │   LLM (JSON: status, answer, citations[])      │
-                 │                  ▼                             │
-                 │   validate: label exists? quote in source?     │
-                 │             numbers in answer appear in source?│
-                 │          fail ─► REFUSE      pass ─► ANSWER    │
-                 └────────────────────────────────────────────────┘
+  ADMIN                                         EMPLOYEE
+  POST /documents                               POST /ask
+       |                                             |
+  validate file (type, size, utf-8, pdf)        validate question (not blank)
+       |                                             |
+  split by headings -> section chunks           hybrid retrieval: BM25 + vectors
+                     + table-row chunks              merged with RRF, top 6
+       |                                             |
+  embed locally (bge-small)                     best vector score < 0.52 ? --yes--> refuse
+       |                                             | no
+  SQLite (documents, chunks, vectors)           LLM gets sources S1..S6, returns JSON
+       |                                             |
+  rebuild in-memory index  ------------------>  check labels, quotes, numbers
+  (numpy matrix + BM25)                              |
+                                                fail -> refuse     pass -> answer
 ```
 
-| Component | File | Responsibility |
+| Component | File | Job |
 |---|---|---|
-| Ingestion | `app/ingest.py` | Decode/validate file, structure-aware chunking |
-| Store | `app/store.py` | SQLite source of truth; atomic re-upload; rebuilds the in-memory index |
-| Retrieval | `app/retrieval.py` | BM25 + dense search, RRF fusion, relevance gate |
-| Answering | `app/answer.py` | Prompt, LLM call, citation validation, refusal mapping |
-| LLM client | `app/llm.py` | One OpenAI-compatible client for Groq / Gemini / Ollama |
+| Ingestion | `app/ingest.py` | Validate and decode files, chunk by structure |
+| Store | `app/store.py` | SQLite source of truth, atomic re-upload, in-memory index |
+| Retrieval | `app/retrieval.py` | BM25 + dense search, RRF, relevance gate |
+| Answering | `app/answer.py` | Prompt, LLM call, citation checks, refusals |
+| LLM client | `app/llm.py` | One OpenAI-compatible client (Groq, Gemini, Ollama) |
 | API / UI | `app/main.py`, `ui/` | FastAPI; Streamlit only renders the JSON |
 
-**Failure paths.** Unreadable or empty file → 422 with a reason, nothing indexed.
-Empty question → 422. No documents → `refused/no_documents`. LLM down, timeout or
-bad JSON twice → `refused/llm_error`. The service never returns a 500 to stand in
-for "I don't know", and never returns an ungrounded answer.
+Failure paths: a bad file or blank question returns 422. No documents, an LLM outage or invalid JSON twice return a normal refusal with a `refusal_reason`, never a 500.
 
-## 2. Chunking & retrieval
+## 2. Chunking and retrieval
 
-**Chunk by document structure, not by character count.** HR policies are
-already organised into numbered sections, and a section is the unit people cite
-("Leave Policy §4.1"). So:
+Policies are organised into numbered sections, and that's how people cite them, so I chunk by headings, not by character count.
 
-- Split on Markdown headings and keep the full **heading path** with each chunk:
-  `4. Carry-forward and encashment > 4.1 Casual leave carry-forward`. That path
-  is the citation's `section`, so citations come from metadata, not from the LLM.
-- A section becomes one chunk if it's ≤ 1,500 characters (most policy sections
-  are). Longer sections split on paragraph or table boundaries, never mid-table
-  or mid-sentence. Parent headings with no text of their own make no chunk.
-- **Tables get two representations.** The whole table stays inside its
-  section chunk, so the model can compare rows. *And* each row becomes its own
-  chunk with the headers repeated:
-  `Health tier: Standard; Eligible bands: Band B, Band C; … Dental implants: Not covered; …`.
-  A bare row (`| Standard | Band B | … | Not covered |`) means nothing on its
-  own; repeating the headers keeps every cell next to its column name, for both
-  the embedder and BM25. This is what makes "Does Standard cover dental
-  implants?" retrieve the exact row.
-- The **embedded text** is `doc title | heading path` + body. A body that only
-  says "A maximum of 8 days…" still lands near "casual leave carry-forward".
+- Each chunk keeps its heading path, e.g. `4. Carry-forward and encashment > 4.1 Casual leave carry-forward`, which becomes the citation's `section`. Parent headings with no text produce no chunk.
+- Sections up to 1,500 characters are one chunk; longer ones split on paragraph or table boundaries, never inside a table. No overlap.
+- Tables are stored twice: whole, in their section chunk, and as one chunk per row with headers repeated (`Health tier: Standard; ... Dental implants: Not covered`). A bare row like `| Standard | ... | Not covered |` means nothing on its own.
+- The embedded text is `title | heading path` plus the body, so "A maximum of 8 days..." still matches a question about casual leave.
 
-**Metadata per chunk:** `chunk_id`, `doc_id`, `doc_title`, `section` (heading
-path), `kind` (`section` / `table_row`), `ordinal`, and the document's
-`content_hash`, which is returned as `doc_version` in citations.
+Questions mix fuzzy intent ("can I roll over leave?") with exact terms ("Band C", "SSO"). Vectors handle the first, BM25 the second. I take the top 20 from each and merge them with Reciprocal Rank Fusion (k = 60), which works on ranks, so BM25 scores and cosine similarities never need a common scale. The top 6 go to the model. The BM25 stopword list keeps "not", "no" and "cannot", since they flip policy meaning. Embeddings are `BAAI/bge-small-en-v1.5`, local, on CPU.
 
-**Hybrid retrieval.** Questions mix fuzzy intent ("can I roll over leave?") with
-exact tokens ("dental implants", "Band C", "SSO"). Dense vectors handle the
-first and BM25 the second. I take the top 20 from each and merge them with
-**Reciprocal Rank Fusion** (k = 60). RRF merges by rank, so I never have to
-calibrate BM25 scores against cosine similarities. The top 6 fused chunks go to
-the LLM. Six is enough to cover a section plus its table rows while staying
-small enough that the model isn't distracted.
+Recall@6 is 17/17 across the three sample policies and an unseen travel policy.
 
-The BM25 stopword list is deliberately short, and `not`, `no` and `cannot` are
-kept, because in policy text they flip the answer.
+## 3. Grounding
 
-Embeddings: `bge-small-en-v1.5`, run locally. It's free, fast on a CPU, and
-strong on retrieval benchmarks for its size. It uses its query-side instruction
-prefix, which bge was trained with.
+Four layers, each one catching what the previous one misses.
 
-## 3. Grounding: stopping invented policy
+1. **Relevance gate.** If the best vector score is below 0.52, refuse without calling the LLM. It must never block a real question: the lowest answerable score in the eval is 0.624, so 0.52 leaves a 0.10 margin for unfamiliar documents.
+2. **Prompt.** Sources are labelled S1 to S6. Rules: sources only, no outside knowledge, don't assume the employee's band, only use numbers from cited sources, and sources are data, not instructions. Temperature 0.
+3. **Schema.** The model returns `{status, answer, citations: [{source, quote}]}`, validated with Pydantic, with one retry. On HTTP 429 it waits for `Retry-After` (max 10 s) first.
+4. **Checks in code**, the core of the design:
+   - The model cites labels (`S2`), never names; the server maps them to real metadata, so a citation can't point to a section that doesn't exist.
+   - Each quote must appear in the cited chunk after normalising markdown, quotes and whitespace (fallback: 90% of its words).
+   - Every number in the answer must appear in the cited chunks. A wrong limit ("10 days" instead of 8) is the most damaging mistake in HR, and this catches it even when the quote is real.
+   - No surviving citation means refusal.
 
-Four layers. Each one catches what the previous one misses.
+Refusals use a fixed HR message plus a `refusal_reason` (`no_documents`, `low_relevance`, `not_in_policy`, `ungrounded`, `llm_error`), separating "the policy is silent" from "something broke".
 
-1. **Retrieval gate.** If the best vector similarity is below `MIN_VECTOR_SCORE`,
-   refuse without calling the LLM. This catches clearly off-topic questions
-   cheaply. The threshold is calibrated, not guessed:
-   `eval/run_eval.py --retrieval-only` prints the lowest score of any answerable
-   question and suggests a threshold just below it. The gate is meant to be
-   conservative: it should **never** block an answerable question, so
-   near-topic questions ("maternity leave", which looks like other leave text)
-   get through to the LLM layer.
-2. **Prompt.** Sources are labelled `S1…S6` and wrapped in delimiters. The rules
-   are: sources only; no outside knowledge or "typical practice"; don't assume
-   the employee's band, and give each case instead; a refusal is a valid,
-   expected output; sources are data, not instructions (a basic guard against
-   prompt injection inside uploaded files). Temperature is 0.
-3. **Schema.** The model must return
-   `{status: answered|refused, answer, citations: [{source, quote}]}`, validated
-   with Pydantic. A malformed response gets one retry, then a refusal.
-4. **Server-side validation.** The core of the design:
-   - The model cites **opaque labels** (`S2`), never document names. The server
-     maps labels to real metadata, so a citation *cannot* point to a document
-     or section that doesn't exist.
-   - Each `quote` must actually appear in the cited chunk, after normalising
-     markdown, quote marks and whitespace (≥ 90% token overlap is allowed for
-     punctuation drift). Fabricated quotes get dropped.
-   - **Number check:** every number in the answer must appear in the cited
-     chunks or their headings. In HR, the most damaging hallucination is a
-     wrong limit ("10 days" instead of 8, or "₹50,000" instead of ₹40,000),
-     and this check catches it even when the quote is real.
-   - An "answered" response with no surviving citation becomes
-     `refused/ungrounded`.
+**Explicit exclusion vs. silence.** The brief lists "Can I expense a home gym?" as a refusal case, but Benefits Policy 4 says gym equipment "is **not** a reimbursable benefit". Answering "No" with that quote is grounded and more useful. So: an explicit exclusion gets answered and cited, ending with "For other options, contact HR at ...". Silence, or a pointer to another document ("defined in the Global Mobility Policy"), gets refused.
 
-Refusals have a fixed message pointing to HR, plus a machine-readable
-`refusal_reason` (`no_documents | low_relevance | not_in_policy | ungrounded | llm_error`).
-That lets us tell "the policy is silent" apart from "the system is broken"
-in logs and metrics.
+**A threshold alone isn't enough.** "How many casual leave days do contractors get?" must be refused (the policy covers full-time staff only), yet it scores 0.808, above every real question. No threshold separates those, which is why refusal is layered.
 
-**A judgement call: explicit "no" vs. silence.** The brief lists "Can I expense a
-home gym?" as a refusal case. But the sample Benefits Policy §4 explicitly says
-*"Gym or home-fitness equipment is **not** a reimbursable benefit."* Answering
-"No", with that citation, is grounded, not invented, and it's more useful than
-"ask HR". So the rule is: **if a policy explicitly excludes something, answer and
-cite the exclusion; if the policy is silent, or only says the topic is defined
-elsewhere (§5: "separate circulars"), refuse.** The eval set tests both
-("home gym" → cited "no"; "WFH internet reimbursement" → refuse).
+**What the eval caught.** 20 questions on the sample policies plus 4 on an unseen travel policy.
 
-**Known trade-off:** the number check can reject a correct *derived* figure
-(e.g. "4 days will lapse" computed from 12 − 8). I accept this false refusal
-in return for never showing an invented number. Section 6 covers how to relax
-it safely.
+- First run: 16/20. Two failures were the checker's fault (a non-breaking space in "31 March"; "does not cover" vs. "not covered"), fixed by normalising and accepting equivalent phrases. One was Groq's free-tier rate limit, fixed with back-off. One was a real bug: the policy says WFH internet "is not defined" here, and the model treated that as an exclusion. Fixed in the prompt: 20/20.
+- The travel policy exposed the same bug again ("visas are defined in the Global Mobility Policy" was answered). My first fix was too specific, so I generalised rules 2 and 3 to any pointer to another document.
+- Final code: 24/24 on the last run and 23/24 on the run before, where the one failure was the trade-off below. I report both because that case is flaky.
 
-## 4. Schema & APIs
+**Known trade-off.** For "I want to take 5 days of privilege leave, how early must I apply?" the model sometimes writes "your 5-day request", the 5 isn't in the policy, and the number check refuses. It failed about 2 runs in 3 even at temperature 0, so LLM output isn't deterministic and verification has to live in code. I kept the check strict: allowing numbers from the question would let "Yes, 10 days" pass for "Can I carry forward 10 days?". It also rejects derived numbers (12 − 8 = 4).
+
+## 4. Schema and APIs
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| `POST` | `/documents` | multipart `file`, header `X-Admin-Token` | `{doc_id, title, version, chunks, status: created/replaced/unchanged}` |
-| `GET` | `/documents` | — | list of documents with version and chunk count |
-| `DELETE` | `/documents/{doc_id}` | admin header | `{deleted}` |
-| `POST` | `/ask` | `{question}` (1–1000 chars, not blank) | `AskResponse` |
-| `GET` | `/health` | — | counts, active model names |
+| POST | `/documents` | multipart `file`, header `X-Admin-Token` | `{doc_id, title, version, chunks, status}` |
+| GET | `/documents` | none | documents with version and chunk count |
+| DELETE | `/documents/{doc_id}` | admin header | `{deleted}`, or 404 |
+| POST | `/ask` | `{question}` (1 to 1000 chars) | `AskResponse` |
+| GET | `/health` | none | counts and model names |
 
-```json
+```
 AskResponse {
-  "status": "answered" | "refused",
-  "answer": "string",                       // fixed HR message when refused
-  "citations": [{ "document", "section", "quote", "doc_id", "doc_version", "chunk_id" }],
-  "refusal_reason": null | "no_documents" | "low_relevance" | "not_in_policy" | "ungrounded" | "llm_error",
-  "retrieval": { "top_vector_score", "chunks": [chunk_id] }   // debug/eval
+  status:         "answered" | "refused"
+  answer:         string (the fixed HR message when refused)
+  citations:      [{document, section, quote, doc_id, doc_version, chunk_id}]
+  refusal_reason: null | no_documents | low_relevance | not_in_policy | ungrounded | llm_error
+  retrieval:      {top_vector_score, chunks}
 }
 ```
 
-**Why this shape:**
-- An explicit `status` enum means clients never have to parse prose to tell an
-  answer from a refusal.
-- The same shape for both outcomes keeps the UI and eval code simple.
-- `quote` lets a reader verify the answer in seconds.
-- `doc_version` makes an answer traceable to the exact file that produced it,
-  which matters once policies are re-uploaded.
-- `refusal_reason` makes refusals measurable.
-- `retrieval` exists for evaluation and debugging; in production it would sit
-  behind a debug flag.
+One shape for answers and refusals, so clients check `status` instead of parsing prose. `quote` lets a reader verify an answer quickly. `doc_version` (the file's content hash) traces an answer to the exact file. `refusal_reason` makes refusals measurable. `retrieval` is for eval and debugging.
 
-**Re-upload / versioning:** `doc_id` is the slugified filename. Re-uploading
-`leave-policy.md` replaces the old chunks in **one SQLite transaction**, so the
-old version disappears only if the new one is fully indexed. An identical file
-is detected by its hash and becomes a no-op.
+`doc_id` is the slugified filename. A re-upload is embedded first, then swapped in one SQLite transaction, so a failure leaves the old version intact. An identical file returns `unchanged`.
 
-## 5. Trade-offs: considered and rejected
+## 5. Trade-offs
 
 | Decision | Chose | Rejected | Why |
 |---|---|---|---|
-| Orchestration | Own thin wrapper (all of `app/` is < 1k lines incl. docstrings) | LangChain / LlamaIndex | The pipeline is 5 steps. A framework would hide exactly the parts being evaluated (chunking, refusal, citation checks) behind defaults, and make them harder to change or explain. |
-| Vector store | SQLite + numpy brute force | Chroma, pgvector, FAISS | A handbook is hundreds to low thousands of chunks; exact cosine over a 384-dim matrix is sub-millisecond. SQLite adds transactions (atomic re-upload) with zero extra services. Switch to pgvector/HNSW past ~100k chunks or with multiple API replicas. |
-| Chunking | Heading-aware + table rows | Fixed 500-token windows with overlap | Fixed windows cut tables and separate numbers from their headings; overlap duplicates text and muddies citations. Sections map 1:1 to how people cite policy. |
-| Citations | LLM cites labels, server fills metadata | LLM writes "Leave Policy §4.1" | Free-text citations can be invented. Labels + server mapping make fake citations structurally impossible. |
-| Refusal | Gate + LLM + validation | LLM judgement only, or threshold only | A threshold alone can't tell "maternity leave" (absent) from "privilege leave" (present); they look alike. The LLM alone can be talked into stretching. Together, they cover each other's blind spots. |
-| Ingestion | Synchronous; handlers are `def`, run in FastAPI's threadpool | Async job queue (Celery/RQ) | A policy file embeds in seconds. A queue adds a broker, job status and polling for no user-visible gain at this size. `def` (not `async def`) keeps CPU-bound embedding off the event loop. |
-| Reranker | None | Cross-encoder rerank | Adds ~100 MB and latency. Hybrid + structure already gets the right section into the top 6 on the eval set. First thing I'd add if recall drops on larger corpora. |
+| Orchestration | Own code (~860 lines) | LangChain, LlamaIndex | Five steps; a framework would hide the parts being judged behind defaults. |
+| Vector store | SQLite + numpy | Chroma, pgvector | A few thousand chunks; exact cosine is sub-millisecond, SQLite gives transactions. |
+| Chunking | Headings + table rows | Fixed 500-token windows | Fixed windows cut tables and split numbers from headings. |
+| Citations | Labels, server fills metadata | Model writes "Leave Policy 4.1" | Free-text citations can be invented. |
+| Refusal | Gate + prompt + checks | Threshold only, or LLM only | See the contractor question. |
+| Ingestion | Sync `def` handlers (threadpool) | Async job queue | A file embeds in seconds. |
+| Reranker | None | Cross-encoder | Recall is already 17/17. |
 
 ## 6. If I had two more weeks
 
-1. **Bigger eval + CI gate.** Grow `eval/questions.yaml` to ~100 cases, written
-   by someone other than the developer, including paraphrases, multi-hop
-   questions ("can I combine CL and SL?") and adversarial prompts. Run it in CI
-   and fail the build if refusal precision or citation accuracy drops.
-2. **PDF tables.** The current PDF path keeps only the text layer, so tables
-   become loose text and row chunking doesn't apply. I'd use `pdfplumber` or
-   Docling table extraction to emit the same header-repeated rows as Markdown.
-3. **Feedback loop.** 👍/👎 on answers, stored with the question, retrieved chunk
-   IDs and model version. A 👎 on a refusal points to missing policy; a 👎 on an
-   answer is a top-priority bug.
-4. **Smarter number check.** Allow numbers derivable by simple arithmetic from
-   cited numbers, instead of rejecting them.
-5. **Scale & ops.** pgvector with an HNSW index, an async ingestion queue for
-   large batches, structured logs per `refusal_reason`, caching of repeated
-   questions, and rate limiting.
-6. **Real auth & audience.** SSO with roles instead of a shared admin token, and
-   use the "Applies to" metadata (full-time vs contractor, country) to filter
-   retrieval by the asker's profile.
-7. **Policy lifecycle.** Keep old versions instead of deleting them (effective
-   dates, "as of" answers), and show a diff when a policy is replaced.
+1. **Independent eval in CI.** The travel policy was written alongside the system, so it isn't a fully independent test. I'd get ~100 questions written by someone else (paraphrases, multi-part, prompt injection) and fail the build on regressions.
+2. **PDF tables** via `pdfplumber`, producing the same header-repeated rows.
+3. **Smarter number check** that accepts derived numbers.
+4. **Feedback** (thumbs up/down with question and chunk IDs).
+5. **Scale:** pgvector/HNSW, a shared index across replicas, async ingestion.
+6. **Auth and audience:** SSO roles, and filtering by "Applies to" (full-time vs. contractor).
 
-## Limitations (stated honestly)
+## Limitations
 
-- Retrieval quality depends on documents having headings; a wall of plain text
-  falls back to "Overview" sections.
-- Small local models (Ollama 8B) follow the JSON and refusal rules less
-  reliably. Validation still prevents ungrounded answers, but they refuse more.
-- Single process: the in-memory index isn't shared across replicas.
+- PDF tables become loose text.
+- The number check rejects correct derived or echoed numbers.
+- The 90% quote fallback is looser than exact matching: a quote can pass against a table where the words are separate cells.
+- Single-process index.
+- The 0.52 threshold is tied to bge-small; another model needs recalibration (`--retrieval-only`).
+- Small local models (Ollama 8B) refuse more often.
